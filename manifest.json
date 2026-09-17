@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Pokémon Browser Pet",
+  "version": "1.0.0",
+  "description": "A little Pokémon that lives in your browser — it walks along your pages, turns at the edges, idles, and reacts when you click it.",
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_title": "Pokémon Browser Pet",
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/boot.js",
+        "src/characters.js",
+        "src/scenes.js",
+        "src/stage.js",
+        "src/content.js"
+      ],
+      "css": [
+        "src/pet.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/icons/pokemon/icons/*.gif",
+        "assets/icons/pokemon/sounds/*.mp3",
+        "assets/scenes/*.glb",
+        "src/vendor/*.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

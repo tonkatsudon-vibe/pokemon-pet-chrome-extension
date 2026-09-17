@@ -1,0 +1,277 @@
+/* Pokémon Browser Pet — overlay styles.
+   Everything is namespaced under #pkmn-pet-root so we never touch the host page. */
+
+#pkmn-pet-root {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  pointer-events: none;      /* never block the page */
+  z-index: 2147483000;       /* high, but below the 32-bit max to avoid fighting real modals */
+  overflow: hidden;
+  contain: layout style;
+}
+
+#pkmn-pet-root * {
+  box-sizing: border-box;
+}
+
+/* The 3D diorama. Transparent canvas, so the page shows around the model
+   instead of a black box — the scene is meant to sit on the page while you
+   keep working in it.
+
+   pointer-events stays none so the empty air around the room never steals a
+   click. The room is grabbed through .pkmn-stage-pad and .pkmn-stage-tools. */
+#pkmn-pet-root .pkmn-stage {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  background: transparent;
+  opacity: 0;
+  transform-origin: 50% 60%;
+  will-change: transform, opacity, filter;
+}
+
+/* Added only once the model has actually loaded — animating an empty canvas
+   and then popping the room in afterwards would defeat the point. */
+#pkmn-pet-root .pkmn-stage.pkmn-in {
+  animation: pkmn-stage-in 620ms cubic-bezier(0.17, 0.89, 0.28, 1.02) both;
+}
+
+#pkmn-pet-root .pkmn-stage.pkmn-out {
+  animation: pkmn-stage-out 260ms cubic-bezier(0.4, 0, 0.9, 0.5) both;
+}
+
+@keyframes pkmn-stage-in {
+  0% {
+    opacity: 0;
+    transform: perspective(1200px) translate3d(0, 46px, -260px) rotateX(14deg) scale(0.84);
+    filter: blur(9px);
+  }
+  55% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(1200px) translate3d(0, 0, 0) rotateX(0deg) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes pkmn-stage-out {
+  from {
+    opacity: 1;
+    transform: perspective(1200px) translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: perspective(1200px) translate3d(0, 26px, -140px) scale(0.9);
+    filter: blur(6px);
+  }
+}
+
+/* Room-shaped grab surface: drag anywhere on the house to move it,
+   triple-click it for an earthquake. Clipped to the room's projected outline
+   from JS (clip-path clips hit testing too), and the room is opaque, so nothing
+   visible on the page is hidden under it. Painted before the pets, so they
+   still get their clicks. */
+#pkmn-pet-root .pkmn-stage-pad {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  background: transparent;
+}
+
+#pkmn-pet-root .pkmn-stage-pad.pkmn-grabbing {
+  cursor: grabbing;
+}
+
+/* Resize grip, parked on the room's front-right corner and clamped on screen
+   from JS. Above the pets so it stays grabbable when one wanders by. */
+#pkmn-pet-root .pkmn-stage-tools {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  pointer-events: auto;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+  opacity: 0.55;
+  transition: opacity 140ms ease, background 140ms ease;
+}
+
+#pkmn-pet-root .pkmn-stage-pad[hidden],
+#pkmn-pet-root .pkmn-stage-tools[hidden] {
+  display: none;
+}
+
+#pkmn-pet-root .pkmn-stage-tools:hover,
+#pkmn-pet-root .pkmn-stage-tools:has(.pkmn-grabbing) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+#pkmn-pet-root .pkmn-stage-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: rgba(0, 0, 0, 0.7);
+  touch-action: none;
+}
+
+#pkmn-pet-root .pkmn-stage-tool:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+#pkmn-pet-root .pkmn-stage-tool svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+#pkmn-pet-root .pkmn-stage-grip { cursor: nwse-resize; }
+
+/* Pets fade across the transition so they never visibly jump from the page
+   into the room. Opacity only — their transform is rewritten every frame by
+   the animation loop and cannot be shared with CSS. */
+#pkmn-pet-root .pkmn-pet {
+  transition: opacity 260ms ease;
+}
+
+#pkmn-pet-root .pkmn-pet.pkmn-hidden {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pkmn-pet-root .pkmn-stage.pkmn-in,
+  #pkmn-pet-root .pkmn-stage.pkmn-out { animation: none; }
+  #pkmn-pet-root .pkmn-stage.pkmn-in { opacity: 1; }
+  #pkmn-pet-root .pkmn-pet { transition: none; }
+}
+
+/* One of these per selected Pokemon. Was an id back when there could only be
+   a single pet; it is a class now so several can share the overlay. Width and
+   height are overwritten from JS with the character's own size. */
+#pkmn-pet-root .pkmn-pet {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 96px;
+  height: 96px;
+  transform: translateX(0);
+  will-change: transform;
+  pointer-events: auto;       /* only the pet itself is clickable */
+  cursor: grab;
+  touch-action: none;         /* let us own touch drags instead of scrolling */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#pkmn-pet-root .pkmn-pet.pkmn-dragging {
+  cursor: grabbing;
+}
+
+#pkmn-pet-root .pkmn-pet.pkmn-dragging .pkmn-pet-sprite img {
+  filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.35));
+}
+
+/* The ground shadow's opacity/scale are driven from JS (it fades out with
+   altitude), so only non-conflicting properties belong here. */
+
+#pkmn-pet-root .pkmn-pet .pkmn-pet-sprite {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 100%;
+  will-change: transform;
+}
+
+#pkmn-pet-root .pkmn-pet .pkmn-pet-sprite img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom center;
+  image-rendering: auto; /* source sprites are hi-res; smooth the downscale */
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+  /* No drop-shadow here on purpose. drop-shadow() traces the sprite's alpha
+     outline, so on a light page it paints a grey halo that reads as a border
+     around the pet — most obvious on a dark, high-contrast sprite like Gengar.
+     Grounding is the .pkmn-pet-shadow ellipse's job; the lifted shadow only
+     appears while dragging, where the halo actually reads as "picked up". */
+}
+
+#pkmn-pet-root .pkmn-pet .pkmn-pet-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 54%;
+  height: 10px;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0) 72%);
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+#pkmn-pet-root .pkmn-pet .pkmn-pet-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translate(-50%, 6px) scale(0.85);
+  padding: 6px 10px;
+  max-width: 200px;
+  white-space: nowrap;
+  font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #1a1a1a;
+  background: #fff;
+  border: 2px solid #2b2b2b;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+#pkmn-pet-root .pkmn-pet .pkmn-pet-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border-right: 2px solid #2b2b2b;
+  border-bottom: 2px solid #2b2b2b;
+  transform: translate(-50%, -6px) rotate(45deg);
+}
+
+#pkmn-pet-root .pkmn-pet .pkmn-pet-bubble.pkmn-show {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pkmn-pet-root .pkmn-pet .pkmn-pet-bubble {
+    transition: none;
+  }
+}

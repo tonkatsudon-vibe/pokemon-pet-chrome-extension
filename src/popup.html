@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pokémon Browser Pet</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1b1b1b;
+        --muted: #6b7280;
+        --line: #e5e7eb;
+        --accent: #ef6c2b;
+        --track: #e5e7eb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1e1e1e;
+          --fg: #f3f3f3;
+          --muted: #9aa0a6;
+          --line: #333;
+          --track: #3a3a3a;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      header img { width: 32px; height: 32px; image-rendering: pixelated; }
+      header h1 { font-size: 15px; margin: 0; font-weight: 700; }
+      header p { margin: 1px 0 0; font-size: 11px; color: var(--muted); }
+
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 11px 0;
+        border-top: 1px solid var(--line);
+      }
+      .row:first-of-type { border-top: 0; }
+      .row[hidden] { display: none; }
+      .row label { font-weight: 600; }
+      .row .hint { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+
+      /* toggle */
+      .switch { position: relative; width: 42px; height: 24px; flex: none; cursor: pointer; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider {
+        position: absolute; inset: 0; cursor: pointer; border-radius: 999px;
+        background: var(--track); transition: background 140ms ease;
+      }
+      .slider::before {
+        content: ""; position: absolute; height: 18px; width: 18px; left: 3px; top: 3px;
+        background: #fff; border-radius: 50%; transition: transform 140ms ease;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+      }
+      .switch input:checked + .slider { background: var(--accent); }
+      .switch input:checked + .slider::before { transform: translateX(18px); }
+
+      /* Roster picker: a stacked row, since four checkboxes don't fit the
+         label-left / control-right shape the other rows use. */
+      .row.stack { display: block; }
+      .row.stack > label { display: block; margin-bottom: 9px; }
+      .picker { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; }
+      .pick {
+        display: flex; align-items: center; gap: 7px; min-width: 0;
+        font-weight: 400; font-size: 12.5px; cursor: pointer;
+      }
+      .pick input {
+        width: 15px; height: 15px; margin: 0; flex: none;
+        accent-color: var(--accent); cursor: pointer;
+      }
+      .pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #rosterHint { display: block; margin-top: 10px; }
+
+      input[type="range"] { width: 130px; accent-color: var(--accent); }
+      select {
+        width: 130px; padding: 5px 6px; border-radius: 7px;
+        border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit;
+      }
+      #speedVal,
+      #scaleVal { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+      button {
+        padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line);
+        background: var(--bg); color: var(--fg); font: inherit; font-size: 12px;
+        font-weight: 600; cursor: pointer;
+      }
+      button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+      button:disabled { opacity: 0.45; cursor: default; }
+      footer { margin-top: 12px; font-size: 11px; color: var(--muted); text-align: center; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <img src="../assets/icons/icon48.png" alt="" />
+      <div>
+        <h1>Pokémon Browser Pet</h1>
+        <p>A little Pokémon that lives in your browser.</p>
+      </div>
+    </header>
+
+    <div class="row">
+      <label for="enabled">Show pet</label>
+      <label class="switch">
+        <input type="checkbox" id="enabled" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="row">
+      <label for="sound">
+        Sound
+        <span class="hint">Cry when you click it</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="sound" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="row">
+      <label for="scene">
+        3D scene
+        <span class="hint">Pets walk inside a diorama</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="scene" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Hidden while only one scene is registered; popup.js reveals it as
+         soon as a second one appears in scenes.js. -->
+    <div class="row" id="sceneRow">
+      <label for="sceneId">
+        Scene
+        <span class="hint">Which diorama</span>
+      </label>
+      <!-- options filled from the shared registry by popup.js -->
+      <select id="sceneId"></select>
+    </div>
+
+    <div class="row stack">
+      <label>
+        Pokémon
+        <span class="hint">Tick everyone you want on screen</span>
+      </label>
+      <!-- filled from the shared registry by popup.js -->
+      <div class="picker" id="picker"></div>
+      <span class="hint" id="rosterHint"></span>
+    </div>
+
+    <div class="row">
+      <label for="movement">
+        Movement
+        <span class="hint">Where it's allowed to go</span>
+      </label>
+      <select id="movement">
+        <option value="free">Free roam ↕↔⤢</option>
+        <option value="ground">Ground only ↔</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="speed">
+        Walk speed
+        <span class="hint">How fast it struts around</span>
+      </label>
+      <span style="display: flex; align-items: center; gap: 8px">
+        <input type="range" id="speed" min="1" max="10" step="1" />
+        <span id="speedVal">5</span>
+      </span>
+    </div>
+
+    <div class="row">
+      <label for="scale">
+        Size
+        <span class="hint">Scales pets and scene together</span>
+      </label>
+      <span style="display: flex; align-items: center; gap: 8px">
+        <input type="range" id="scale" min="40" max="150" step="5" />
+        <span id="scaleVal">100%</span>
+      </span>
+    </div>
+
+    <div class="row">
+      <label for="hardReload">
+        Reload
+        <span class="hint">Rebuild pets and scene from scratch</span>
+      </label>
+      <button id="hardReload" type="button">Reload</button>
+    </div>
+
+    <footer>Reload open tabs if the pet doesn't appear.</footer>
+
+    <script src="characters.js"></script>
+    <script src="scenes.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
