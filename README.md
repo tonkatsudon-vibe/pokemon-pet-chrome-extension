@@ -24,7 +24,11 @@ page. Any combination of them can be on screen together.
 
 | Sprite | Pokémon | Box | Speed | Art faces | Cry |
 | :----: | ------- | --: | ----: | :-------: | :-: |
+| <img src="assets/icons/pokemon/icons/charmander.gif" width="96" alt="Charmander"> | **Charmander** | 76px | 44px/s | ◀ | 〰️ |
+| <img src="assets/icons/pokemon/icons/charmeleon.gif" width="96" alt="Charmeleon"> | **Charmeleon** | 90px | 50px/s | ◀ | 〰️ |
 | <img src="assets/icons/pokemon/icons/charizard.gif" width="96" alt="Charizard"> | **Charizard** | 104px | 58px/s | ◀ | 🔊 |
+| <img src="assets/icons/pokemon/icons/gastly.gif" width="96" alt="Gastly"> | **Gastly** | 80px | 40px/s | ◀ | 〰️ |
+| <img src="assets/icons/pokemon/icons/haunter.gif" width="96" alt="Haunter"> | **Haunter** | 92px | 48px/s | ◀ | 〰️ |
 | <img src="assets/icons/pokemon/icons/gengar.gif" width="96" alt="Gengar (Shiny)"> | **Gengar (Shiny)** | 96px | 46px/s | ◀ | 🔊 |
 | <img src="assets/icons/pokemon/icons/sylveon.gif" width="96" alt="Sylveon"> | **Sylveon** | 84px | 52px/s | ◀ | 🔊 |
 | <img src="assets/icons/pokemon/icons/mewtwo.gif" width="96" alt="Mewtwo"> | **Mewtwo** | 100px | 40px/s | ▶ | 🔊 |
@@ -37,6 +41,10 @@ character's natural pace at slider position 5. "Art faces" is the direction the
 raw sprite looks — the engine flips it horizontally so the pet always faces the
 way it is moving. 🔊 means a recorded cry in `assets/icons/pokemon/sounds/`;
 〰️ means none ships, so the engine **synthesizes** one (see below).
+
+Charmander, Charmeleon and Charizard — and Gastly, Haunter and Gengar — are
+two lines rather than six unrelated pets: double-click a Charmander or a
+Gastly and it evolves (see [Evolution](#evolution)).
 
 The whole table lives in **`src/characters.js`**, which both the engine and the
 popup read, so the two can never disagree about who exists.
@@ -123,6 +131,32 @@ Grab the pet with the mouse (or a finger) and drop it anywhere on screen.
 - Dragging uses Pointer Events with pointer capture, and the pet sets
   `touch-action: none`, so a touch drag moves the pet instead of scrolling the
   page. Position is re-clamped on `resize`, so it can never end up off-screen.
+
+## Evolution
+
+**Double-click** Gastly and it evolves into Haunter; double-click Haunter and it
+becomes Gengar. Gengar is the end of the line and double-clicking it just gets
+you two hops.
+
+- The pet freezes, buzzes on the spot and **strobes white** — `brightness(0)
+  invert(1)` knocks the colour out of the GIF while keeping its exact
+  silhouette — while a glow and a ring of sparkle rays build up behind it.
+- The sprite is swapped **at the peak of the white-out**, so you never see one
+  form turn into the other; the new one blows out of the flash over-bright and
+  settles into colour. Charge 1100 ms, burst 700 ms.
+- It is a real roster change, not a costume: the evolution is written back to
+  `chrome.storage.local`, so the popup's tick moves from Gastly to Haunter and
+  the new form survives a reload. The pet keeps its element, its position and
+  its saved walking line — nothing is torn down and respawned.
+- Evolving into a Pokémon that is **already on screen** merges the two; the
+  roster is a set, and two identical pets would just be confusing.
+- The pet ignores the pointer while it is evolving, so a stray drag can't
+  interrupt the flash.
+- With `prefers-reduced-motion` the strobe and the spin are dropped for a plain
+  glow — the swap still happens, on the same timings.
+
+Which Pokémon can evolve, and into what, is one field in the registry
+(`evolvesTo`), so extending the idea to other lines is one line of data each.
 
 ## Multiple pets
 
@@ -363,8 +397,31 @@ and never starts suspended.
   returned promise is caught and ignored regardless, so a page that refuses
   the load can never break the pet.
 - Clicking a **sleeping** pet cries *and* wakes it.
+- **Evolving** has its own synthesized sequence (see below), and the new form
+  cries once the flash is over.
 - The **Sound** toggle in the popup mutes it. Like every other setting it lives
   in `chrome.storage.local` and applies to open tabs immediately.
+
+### The evolution sound
+
+Also synthesized — no mp3 ships for it — and scheduled as one piece:
+
+- A chiptune **blip on every white flash** of the sprite's strobe, each a
+  little higher than the last. `EVOLVE_BEATS` holds the flash positions as
+  fractions of the charge, mirroring the `pkmn-evo-strobe` keyframes, so the
+  sound lands on the light instead of merely near it.
+- A **sawtooth hum** sweeping 70 → 240 Hz underneath, swelling to the swap, so
+  the charge has a floor to climb.
+- At the swap, a rising **C-E-G-C chime** over a band of noise sweeping
+  1.8 → 7 kHz — the sparkle.
+
+The whole sequence is scheduled on the **audio clock** the moment the pet is
+double-clicked, not with `setTimeout`. Two reasons: the chime has to land on
+the flash, which the audio clock can guarantee and a timer can't; and being
+scheduled inside the `pointerup` handler means even the part that sounds a
+second later inherits that user gesture. The call returns a handle whose
+`stop()` silences whatever hasn't played yet, so a pet destroyed mid-evolution
+doesn't keep chiming after it's gone.
 
 ---
 
@@ -480,9 +537,13 @@ moves the pet.
 | `INTERACT` | click (tap under 4px of movement) | `IDLE`                                      | `INTERACT_MS` 780 ms |
 | `SLEEP`    | 60 s with no user input           | `IDLE` on any activity or click             | until woken     |
 | `DRAG`     | pointer moved > 4px on the pet    | `TURNING` on release                        | until release   |
+| `EVOLVE`   | double-click on a pet with a next form | `IDLE` when the flash ends             | 1100 + 700 ms   |
 
 Every pet runs its **own** copy of this machine, so one can be napping while
-another is mid-climb. `DRAG` short-circuits `tickState()` entirely — while held,
+another is mid-climb. `EVOLVE` has deliberately **no case** in `tickState()` —
+falling through the switch is what holds the pet still for the flash, and the
+two timers that swap the sprite and end the sequence are the only way out, so a
+backgrounded tab (no rAF) still finishes evolving. `DRAG` short-circuits `tickState()` entirely — while held,
 the pointer owns the position and that pet has no autonomy. Activity is sampled from `mousemove`,
 `mousedown`, `keydown`, `wheel`, `touchstart`, `scroll`, all captured passively
 on `window`.
@@ -570,7 +631,9 @@ pointerdown  -> dragCandidate = true, record downX/downY, grab offset,
                 setPointerCapture
 pointermove  -> hypot(move) < 4px ? ignore : beginDrag(); track position,
                 smooth dragLean = lean·0.7 + dx·0.3, set facing from dx
-pointerup    -> wasDragging ? endDrag() : onInteract()
+pointerup    -> wasDragging ? endDrag() : onClick()
+onClick      -> second click within 340 ms and char.evolvesTo ? evolve()
+                                                              : onInteract()
 ```
 
 - `DRAG_THRESHOLD_PX = 4` is the click/drag arbiter, so a shaky click still
@@ -585,6 +648,13 @@ pointerup    -> wasDragging ? endDrag() : onInteract()
   still cries, because the cry fires before the sleep branch.
 - The cry is played from `onInteract()`, i.e. inside the `pointerup` handler,
   so it inherits the user gesture that autoplay policy requires.
+- The double-click test is **timestamps, not the `dblclick` event**:
+  `pointerdown` calls `preventDefault()`, which suppresses the compatibility
+  mouse events `dblclick` is built from. `DOUBLE_CLICK_MS = 340`.
+- The first click still hops and cries immediately rather than waiting 340 ms
+  to find out whether a second one is coming — holding it back would make every
+  single click feel late, and would take the cry outside its user gesture.
+  The stamp is **reset** on a double, so a triple click isn't two doubles.
 
 ## 9. DOM & CSS contract
 
@@ -596,6 +666,7 @@ pointerup    -> wasDragging ? endDrag() : onInteract()
                           pointer-events:auto · touch-action:none · cursor:grab
                           transform: translate(x, -yOffset)
        ├─ .pkmn-pet-shadow   radial gradient ellipse; opacity/scale driven from JS
+       ├─ .pkmn-pet-flash     evolution glow + sparkle rays; idle at opacity 0
        ├─ .pkmn-pet-sprite   transform-origin 50% 100%; carries the pose
        │    └─ img           object-fit:contain, object-position:bottom center
        └─ .pkmn-pet-bubble   speech bubble; .pkmn-show fades it in
@@ -615,6 +686,11 @@ Isolation rules the extension holds itself to:
 - `contain: layout style` keeps the overlay out of the page's layout work.
 - The pet sets `touch-action: none` and `user-select: none` so a touch drag
   moves the pet rather than scrolling or selecting.
+- **CSS may only animate what JS doesn't own.** `.pkmn-pet` and
+  `.pkmn-pet-sprite` have their `transform` rewritten every frame by the
+  animation loop, so the evolution keyframes are confined to the `<img>`'s
+  `filter` (never touched from JS) and to `.pkmn-pet-flash`, its own layer.
+  Same rule as the scene entrance, which is why pets *fade* across it.
 
 ## 10. Lifecycle & resilience
 
@@ -663,6 +739,10 @@ All in `src/content.js`, top of file:
 | `QUAKE_SPEED`            | `4`            | pace multiplier at the start of a quake    |
 | `QUAKE_SHAKE_PX`         | `10`           | peak shake amplitude                       |
 | `QUAKE_SOUND_MS`         | `3500`         | quake rumble + speech bubble length        |
+| `DOUBLE_CLICK_MS`        | `340`          | two clicks inside this evolve the pet      |
+| `EVOLVE_CHARGE_MS`       | `1100`         | strobe before the sprite is swapped        |
+| `EVOLVE_BURST_MS`        | `700`          | white-out, swap, fade back to colour       |
+| `EVOLVE_BEATS`           | 6 fractions    | where the strobe flashes — and the blips land |
 | `GAITS`                  | see §6         | gait weights and bout lengths              |
 
 ## 13. Adding a character
@@ -691,6 +771,7 @@ sounds/*.mp3}` are already web-accessible — so there is no manifest change, no
 | `faces`     | `"left"` / `"right"` — which way the *raw art* looks           |
 | `baseSpeed` | px/second at speed slider 5                                    |
 | `noMp3`     | optional; `true` when no recording ships — the engine synthesizes a cry instead |
+| `evolvesTo` | optional; the `key` of the next form — double-clicking this pet turns it into that one |
 
 Get `faces` wrong and the pet moon-walks — it's the direction the artwork looks
 before the engine flips it, not the direction you want it to travel.
@@ -816,6 +897,14 @@ Chrome forbids (`chrome://`, the Web Store, other extensions, the PDF viewer).
 - [ ] Unticking one removes only that pet; the others keep walking undisturbed.
 - [ ] Unticking everything empties the page and survives a reload.
 - [ ] Each pet remembers its own drop height independently.
+- [ ] Double-clicking Charmander evolves it to Charmeleon and again to Charizard,
+      with the white flash; same for Gastly → Haunter → Gengar; the popup's tick follows and the new form survives a reload.
+- [ ] The evolution sound builds with the strobe and chimes on the flash, the
+      new form cries afterwards, and Sound off means silence throughout.
+- [ ] The evolved pet stays where it was standing and keeps walking afterwards.
+- [ ] Double-clicking Charizard or Gengar (or any final form) just hops it twice.
+- [ ] A single click never evolves, and a drag never pairs with a click into one.
+- [ ] Evolving into a Pokémon that is already on screen leaves exactly one of it.
 - [ ] Scene on: diorama appears (page not dimmed), pets are penned onto its floor.
 - [ ] Pets stay inside the floor at the back, where it is narrower.
 - [ ] Scene off: canvas is gone, pets roam the whole page again.
@@ -851,7 +940,8 @@ Chrome forbids (`chrome://`, the Web Store, other extensions, the PDF viewer).
 - [ ] Disabling removes the node entirely; re-enabling restores it.
 - [ ] Host page is fully clickable everywhere except the pet.
 - [ ] CPU ~0% with the tab in the background.
-- [ ] `prefers-reduced-motion` keeps walking but drops the bob/pitch/squash.
+- [ ] `prefers-reduced-motion` keeps walking but drops the bob/pitch/squash, and
+      evolution still swaps the sprite behind a plain glow.
 
 ---
 
@@ -920,4 +1010,3 @@ contract between the two shells.
 - **V4** — ~~lift the engine into a shared core and wrap it in an Electron
   desktop shell~~ — done, via the shim above rather than by extracting a
   separate package.
-# pokemon-pet-chrome-extension

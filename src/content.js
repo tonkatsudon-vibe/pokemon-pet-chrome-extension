@@ -77,10 +77,24 @@
   const TURN_MS = 260;
   const INTERACT_MS = 780;
   const DRAG_THRESHOLD_PX = 4; // move further than this and it's a drag, not a click
+  const DOUBLE_CLICK_MS = 340; // two clicks closer together than this evolve the pet
   const EDGE_EPS = 2; // px tolerance when deciding "am I against a wall?"
   const PITCH_DEG = 14; // how far the sprite noses up/down when climbing/diving
   const SHADOW_FADE_PX = 160; // altitude at which the ground shadow has faded out
   const CRY_VOLUME = 0.5; // the pet lives on someone else's page — don't shout
+
+  /* Evolution — double-click a pet whose character has an `evolvesTo`.
+   * The pet freezes, flickers white, and the sprite is swapped at the peak of
+   * the flash, so the old form is never seen turning into the new one. The
+   * timings are shared with the pkmn-evo-* keyframes in pet.css and have to
+   * move together with them. */
+  const EVOLVE_CHARGE_MS = 1100; // flicker before the swap
+  const EVOLVE_BURST_MS = 700; // white-out, swap, then fade back to colour
+  const EVOLVE_PHRASES = ["…?", "Huh?", "!"]; // said as the flicker starts
+  /* Where the sprite strobes white, as fractions of EVOLVE_CHARGE_MS. These
+   * mirror the pkmn-evo-strobe keyframes, so the charge blips land on the
+   * light rather than merely near it. */
+  const EVOLVE_BEATS = [0.12, 0.31, 0.5, 0.66, 0.79, 0.9];
 
   /* Zoom. One factor scales the sprites and the diorama together, so the pets
    * stay in proportion to the room they are standing in — shrinking only the
@@ -264,6 +278,133 @@
       return this._ctx;
     },
 
+    /** The evolution sound, synthesized rather than shipped: an accelerating
+     *  charge that lands one blip on each white flash of the sprite's strobe,
+     *  a rising hum underneath it, and a four-note chime with a sparkle of
+     *  filtered noise at the moment the new form appears.
+     *
+     *  The whole sequence is scheduled in one go on the audio clock. It is
+     *  started from a pointerup handler, so even the part that sounds a second
+     *  later inherits that user gesture — and the audio clock, not setTimeout,
+     *  is what keeps it locked to the CSS keyframes.
+     *
+     *  Returns a handle whose stop() silences whatever has not played yet, for
+     *  when the pet is torn down mid-evolution. */
+    evolution(chargeMs, beats) {
+      const ctx = this.context();
+      if (!ctx) return null;
+
+      const t0 = ctx.currentTime;
+      const charge = chargeMs / 1000;
+      const sources = [];
+      let master = null;
+
+      try {
+        master = ctx.createGain();
+        master.gain.value = CRY_VOLUME;
+        master.connect(ctx.destination);
+
+        /** One enveloped note. exponentialRamp can't start from 0, hence the
+         *  near-zero floor either side. */
+        const note = (at, freq, dur, type, peak) => {
+          const gain = ctx.createGain();
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.exponentialRampToValueAtTime(peak, at + 0.012);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+          gain.connect(master);
+
+          const osc = ctx.createOscillator();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, at);
+          osc.connect(gain);
+          osc.start(at);
+          osc.stop(at + dur);
+          osc.onended = () => {
+            osc.disconnect();
+            gain.disconnect();
+          };
+          sources.push(osc);
+        };
+
+        // Charge: chiptune blips, one per flash, each a little higher.
+        beats.forEach((p, i) => {
+          note(t0 + p * charge, 330 * Math.pow(1.11, i), 0.09, "square", 0.22);
+        });
+
+        // A hum swelling under the blips, so the charge has a floor to climb.
+        const humGain = ctx.createGain();
+        humGain.gain.setValueAtTime(0.0001, t0);
+        humGain.gain.exponentialRampToValueAtTime(0.13, t0 + charge);
+        humGain.gain.exponentialRampToValueAtTime(0.0001, t0 + charge + 0.12);
+        humGain.connect(master);
+        const hum = ctx.createOscillator();
+        hum.type = "sawtooth";
+        hum.frequency.setValueAtTime(70, t0);
+        hum.frequency.exponentialRampToValueAtTime(240, t0 + charge);
+        hum.connect(humGain);
+        hum.start(t0);
+        hum.stop(t0 + charge + 0.14);
+        hum.onended = () => {
+          hum.disconnect();
+          humGain.disconnect();
+        };
+        sources.push(hum);
+
+        // The swap: a rising chime, C-E-G-C.
+        [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+          note(t0 + charge + i * 0.055, f, 0.55, "triangle", 0.3);
+        });
+
+        // ...and the shiny itself: a band of noise sweeping upwards.
+        const len = Math.floor(ctx.sampleRate * 0.6);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+        const noise = ctx.createBufferSource();
+        noise.buffer = buf;
+        const band = ctx.createBiquadFilter();
+        band.type = "bandpass";
+        band.Q.value = 1.2;
+        band.frequency.setValueAtTime(1800, t0 + charge);
+        band.frequency.exponentialRampToValueAtTime(7000, t0 + charge + 0.45);
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.0001, t0 + charge);
+        noiseGain.gain.exponentialRampToValueAtTime(0.2, t0 + charge + 0.05);
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + charge + 0.6);
+        noise.connect(band);
+        band.connect(noiseGain);
+        noiseGain.connect(master);
+        noise.start(t0 + charge);
+        noise.onended = () => {
+          noise.disconnect();
+          band.disconnect();
+          noiseGain.disconnect();
+        };
+        sources.push(noise);
+      } catch (_) {
+        /* the sound is a nicety; never let it break the evolution */
+      }
+
+      return {
+        stop() {
+          for (const src of sources) {
+            try {
+              src.stop();
+            } catch (_) {
+              /* already finished, or never started */
+            }
+          }
+          if (master) {
+            try {
+              master.disconnect();
+            } catch (_) {
+              /* already gone */
+            }
+          }
+        },
+      };
+    },
+
     /** Stand-in cry for a character with no mp3.
      *
      *  A square-wave chirp that rises then falls — deliberately chiptune-ish,
@@ -346,6 +487,12 @@
       this.downY = 0;
       this.dragLean = 0; // smoothed pointer velocity, used to tilt the sprite
       this.lastPointerX = 0;
+
+      // evolution
+      this.lastClickAt = 0; // for the double-click test; 0 == no click pending
+      this.evolveStart = 0;
+      this.evolveTimers = [];
+      this.evolveSound = null; // handle for the scheduled evolution sequence
 
       this.build();
     }
@@ -475,7 +622,9 @@
       el.dataset.pkmn = this.key;
       el.setAttribute("role", "button");
       el.setAttribute("aria-label", c.name + " browser pet");
-      el.title = c.name + " — click me, or drag me anywhere";
+      el.title = c.evolvesTo
+        ? c.name + " — click me, drag me anywhere, or double-click to evolve"
+        : c.name + " — click me, or drag me anywhere";
       el.style.width = this.size + "px";
       el.style.height = this.size + "px";
 
@@ -495,8 +644,15 @@
       bubble.className = "pkmn-pet-bubble";
       bubble.setAttribute("aria-hidden", "true");
 
+      // The evolution burst. Its own layer because the sprite's transform is
+      // rewritten every frame from JS and cannot be handed to CSS.
+      const flash = document.createElement("div");
+      flash.className = "pkmn-pet-flash";
+      flash.setAttribute("aria-hidden", "true");
+
       sprite.appendChild(img);
       el.appendChild(shadow);
+      el.appendChild(flash);
       el.appendChild(sprite);
       el.appendChild(bubble);
 
@@ -513,6 +669,7 @@
       this.img = img;
       this.shadow = shadow;
       this.bubble = bubble;
+      this.flash = flash;
 
       if (this.cfg.sound) Cries.load(c.cry); // prefetch so the first click isn't late
     }
@@ -533,6 +690,12 @@
 
     destroy() {
       clearTimeout(this.bubbleTimer);
+      this.evolveTimers.forEach(clearTimeout);
+      this.evolveTimers = [];
+      // Notes are scheduled ahead of time, so a pet torn down mid-evolution
+      // would otherwise keep chiming after it is gone.
+      if (this.evolveSound) this.evolveSound.stop();
+      this.evolveSound = null;
       if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el);
     }
 
@@ -540,6 +703,8 @@
 
     onPointerDown(e) {
       if (e.button !== 0 && e.pointerType === "mouse") return;
+      // Mid-evolution the pet belongs to the animation, not to the pointer.
+      if (this.state === "EVOLVE") return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -604,9 +769,11 @@
       }
 
       if (wasDragging) {
+        // A drag isn't half of a double-click; don't let it pair with a click.
+        this.lastClickAt = 0;
         this.endDrag();
       } else {
-        this.onInteract(); // a plain click
+        this.onClick();
       }
     }
 
@@ -639,6 +806,83 @@
       const next = { ...this.cfg.yOffsets, [this.key]: y };
       this.cfg.yOffsets = next;
       chrome.storage.local.set({ yOffsets: next });
+    }
+
+    /** A click that wasn't a drag. Two of them in quick succession on a pet
+     *  with a next form evolve it; anything else is the usual hop-and-cry.
+     *  The first click still reacts immediately — waiting DOUBLE_CLICK_MS to
+     *  find out whether a second one is coming would make every single click
+     *  feel late, and the cry also has to stay inside the user gesture. */
+    onClick() {
+      const now = performance.now();
+      const isDouble = this.lastClickAt > 0 && now - this.lastClickAt < DOUBLE_CLICK_MS;
+      // Reset rather than restamp, so a triple click isn't two double clicks.
+      this.lastClickAt = isDouble ? 0 : now;
+
+      if (isDouble && this.char.evolvesTo) {
+        this.evolve(now);
+        return;
+      }
+      this.onInteract();
+    }
+
+    /** Double-clicked: freeze, flicker white, swap to the next form.
+     *  The swap happens at the peak of the flash — the point of the white-out
+     *  is that you never see one sprite become the other. */
+    evolve(now) {
+      const to = this.char.evolvesTo;
+      if (!to || !CHARACTERS[to] || this.state === "EVOLVE") return;
+
+      const from = this.key;
+      this.world.lastActivity = now;
+      this.state = "EVOLVE"; // no case in tickState, so the pet holds still
+      this.evolveStart = now;
+      this.el.classList.add("pkmn-evolving");
+      this.say(EVOLVE_PHRASES[(Math.random() * EVOLVE_PHRASES.length) | 0], EVOLVE_CHARGE_MS);
+      if (this.cfg.sound) {
+        // Scheduled here, in the pointerup gesture, rather than alongside the
+        // timers below — the chime has to land with the flash, and setTimeout
+        // is not the clock for that.
+        this.evolveSound = Cries.evolution(EVOLVE_CHARGE_MS, EVOLVE_BEATS);
+        Cries.load(CHARACTERS[to].cry); // ready for the reveal
+      }
+
+      this.evolveTimers.push(
+        setTimeout(() => this.swapForm(from, to), EVOLVE_CHARGE_MS),
+        setTimeout(() => this.endEvolve(to), EVOLVE_CHARGE_MS + EVOLVE_BURST_MS)
+      );
+    }
+
+    /** Peak of the flash: become the new character. */
+    swapForm(from, to) {
+      const c = CHARACTERS[to];
+      this.key = to;
+      this.el.dataset.pkmn = to;
+      this.el.setAttribute("aria-label", c.name + " browser pet");
+      this.el.title = c.evolvesTo
+        ? c.name + " — click me, drag me anywhere, or double-click to evolve"
+        : c.name + " — click me, or drag me anywhere";
+      this.img.src = chrome.runtime.getURL(c.file);
+      this.el.classList.remove("pkmn-evolving");
+      this.el.classList.add("pkmn-evolved");
+      // A bigger form has to grow from its feet, not sink through the floor.
+      this.applySize();
+      this.clampToBounds();
+      // Tell the world last: it rewrites the stored roster, and every pet
+      // wants to already be its new self when that comes back as a change.
+      this.world.onEvolved(this, from, to);
+    }
+
+    /** The flash is over: announce the new form and hand the pet back to the
+     *  state machine. */
+    endEvolve(to) {
+      this.evolveTimers = [];
+      this.evolveSound = null; // everything it scheduled has played by now
+      this.el.classList.remove("pkmn-evolved");
+      if (this.state !== "EVOLVE") return; // superseded (a config reload, say)
+      if (this.cfg.sound) Cries.play(CHARACTERS[to].cry, to);
+      this.say(CHARACTERS[to].name + "!");
+      this.enterIdle(performance.now());
     }
 
     onInteract() {
@@ -872,7 +1116,24 @@
         by = -4;
         rot = prefersReducedMotion ? 0 : clamp(this.dragLean * 0.6, -14, 14);
       } else if (!prefersReducedMotion) {
-        if (this.state === "WALKING") {
+        if (this.state === "EVOLVE") {
+          // Buzzing on the spot: the shiver widens and quickens as the light
+          // builds, then the new form pops out of the flash and settles.
+          const t = now - this.evolveStart;
+          if (t < EVOLVE_CHARGE_MS) {
+            const p = clamp(t / EVOLVE_CHARGE_MS, 0, 1);
+            rot = Math.sin(t * (0.02 + p * 0.06)) * (1 + p * 6);
+            sx = 1 - p * 0.05;
+            sy = 1 + p * 0.07;
+            by = -p * 5;
+          } else {
+            const q = clamp((t - EVOLVE_CHARGE_MS) / EVOLVE_BURST_MS, 0, 1);
+            const pop = 1 - q; // eases the pop-out back to the resting size
+            sx = 1 + pop * 0.14;
+            sy = 1 + pop * 0.14;
+            by = -pop * 7;
+          }
+        } else if (this.state === "WALKING") {
           // Footstep bob fades out as the heading turns vertical; a slower
           // hover sway fades in to replace it.
           const stride = this.stride;
@@ -1438,6 +1699,38 @@
       // also keeps every pet after the stage canvas and its grab pad.
       this.pets.sort((a, b) => CHARACTER_KEYS.indexOf(a.key) - CHARACTER_KEYS.indexOf(b.key));
       this.raisePets();
+    },
+
+    /** A pet just became its next form. The roster is a set of characters, so
+     *  the evolution has to be written back to it — otherwise the very next
+     *  config change would reconcile the pet straight back into its old self.
+     *
+     *  `cfg` is updated here as well as in storage, so when the write echoes
+     *  back through applyConfig it is already a no-op and nothing is rebuilt:
+     *  the pet keeps its position, its heading and its element. */
+    onEvolved(pet, from, to) {
+      // Evolving into a species already on screen would make two of it.
+      const dupes = this.pets.filter((p) => p !== pet && p.key === to);
+      dupes.forEach((p) => p.destroy());
+      if (dupes.length) this.pets = this.pets.filter((p) => !dupes.includes(p));
+
+      const characters = this.cfg.characters
+        .map((k) => (k === from ? to : k))
+        .filter((k, i, all) => all.indexOf(k) === i);
+      // The new form stands where the old one did, under its own key.
+      const yOffsets = { ...this.cfg.yOffsets, [to]: Math.round(pet.yOffset) };
+      delete yOffsets[from];
+
+      this.cfg.characters = characters;
+      this.cfg.yOffsets = yOffsets;
+      chrome.storage.local.set({ characters, yOffsets });
+
+      // Registry order changed under us; keep the paint order matching it.
+      // Only re-append when the order really moved — re-inserting an element
+      // restarts its CSS animation, and this lands mid-flash.
+      const was = this.pets.slice();
+      this.pets.sort((a, b) => CHARACTER_KEYS.indexOf(a.key) - CHARACTER_KEYS.indexOf(b.key));
+      if (this.pets.some((p, i) => p !== was[i])) this.raisePets();
     },
 
     // -- events -------------------------------------------------------------

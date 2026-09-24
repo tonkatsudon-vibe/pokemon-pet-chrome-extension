@@ -275,3 +275,150 @@
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Evolution — double-click a Pokémon that has a next form.
+
+   Only properties the animation loop doesn't own may be animated here: the
+   pet's and the sprite's transforms are rewritten every frame from JS, so the
+   shiny lives on the <img> (which JS never touches) and on its own flash
+   layer. Timings mirror EVOLVE_CHARGE_MS / EVOLVE_BURST_MS in content.js.
+   --------------------------------------------------------------------------- */
+
+/* The burst: a sheet of light behind the sprite, twice the pet's box so it can
+   bloom past the edges. Idle until one of the animations below is applied. */
+#pkmn-pet-root .pkmn-pet .pkmn-pet-flash {
+  position: absolute;
+  left: -50%;
+  top: -50%;
+  width: 200%;
+  height: 200%;
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(238, 222, 255, 0.66) 24%,
+    rgba(167, 120, 255, 0.4) 44%,
+    rgba(167, 120, 255, 0) 72%
+  );
+}
+
+/* Sparkle rays, kept on a pseudo-element so they can spin independently of
+   the glow's bloom. Masked to a ring so the rays don't cross the sprite's
+   face, and fade out before the edge instead of ending in a hard circle. */
+#pkmn-pet-root .pkmn-pet .pkmn-pet-flash::before {
+  content: "";
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 1) 0deg 2deg,
+    rgba(255, 255, 255, 0) 2deg 15deg
+  );
+  /* Masked to a ring that sits outside the white core — inside it the rays
+     would be white on white and simply vanish. */
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 24%, #000 42%, #000 58%, transparent 78%);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 24%, #000 42%, #000 58%, transparent 78%);
+}
+
+/* Charging: the sprite strobes between itself and a white silhouette —
+   brightness(0) knocks the colour out, invert(1) paints what's left white,
+   and the alpha of the GIF is preserved, so the shape stays exact. The
+   strobe gets faster as it goes; the glow behind it swells to meet it. */
+#pkmn-pet-root .pkmn-pet.pkmn-evolving .pkmn-pet-sprite img {
+  animation: pkmn-evo-strobe 1100ms linear both;
+}
+
+#pkmn-pet-root .pkmn-pet.pkmn-evolving .pkmn-pet-flash {
+  animation: pkmn-evo-charge 1100ms ease-in both;
+}
+
+#pkmn-pet-root .pkmn-pet.pkmn-evolving .pkmn-pet-flash::before {
+  animation: pkmn-evo-rays 1100ms linear both;
+}
+
+/* The swap has happened: the new form starts as pure white and bleeds back
+   into colour while the flash blows outwards. */
+#pkmn-pet-root .pkmn-pet.pkmn-evolved .pkmn-pet-sprite img {
+  animation: pkmn-evo-reveal 700ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+#pkmn-pet-root .pkmn-pet.pkmn-evolved .pkmn-pet-flash {
+  animation: pkmn-evo-burst 700ms cubic-bezier(0.1, 0.8, 0.3, 1) both;
+}
+
+#pkmn-pet-root .pkmn-pet.pkmn-evolved .pkmn-pet-flash::before {
+  animation: pkmn-evo-rays-out 700ms cubic-bezier(0.1, 0.8, 0.3, 1) both;
+}
+
+@keyframes pkmn-evo-strobe {
+  /* Long dark beats first, then barely a gap — the classic accelerating
+     flicker. `filter: none` and the white silhouette, nothing in between. */
+  0%, 11% { filter: none; }
+  12%, 19% { filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(255, 255, 255, 0.9)); }
+  20%, 30% { filter: none; }
+  31%, 40% { filter: brightness(0) invert(1) drop-shadow(0 0 7px rgba(255, 255, 255, 0.9)); }
+  41%, 49% { filter: none; }
+  50%, 58% { filter: brightness(0) invert(1) drop-shadow(0 0 8px rgba(255, 255, 255, 0.95)); }
+  59%, 65% { filter: none; }
+  66%, 73% { filter: brightness(0) invert(1) drop-shadow(0 0 9px #fff); }
+  74%, 78% { filter: none; }
+  79%, 85% { filter: brightness(0) invert(1) drop-shadow(0 0 10px #fff); }
+  86%, 89% { filter: none; }
+  90%, 100% { filter: brightness(0) invert(1) drop-shadow(0 0 14px #fff); }
+}
+
+@keyframes pkmn-evo-charge {
+  0% { opacity: 0; transform: scale(0.35); }
+  55% { opacity: 0.55; transform: scale(0.6); }
+  100% { opacity: 0.95; transform: scale(0.92); }
+}
+
+@keyframes pkmn-evo-rays {
+  0% { opacity: 0; transform: rotate(0deg) scale(0.7); }
+  55% { opacity: 0.5; transform: rotate(120deg) scale(0.85); }
+  100% { opacity: 0.9; transform: rotate(320deg) scale(1); }
+}
+
+@keyframes pkmn-evo-burst {
+  0% { opacity: 1; transform: scale(0.92); }
+  22% { opacity: 1; transform: scale(1.18); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+
+@keyframes pkmn-evo-rays-out {
+  0% { opacity: 0.9; transform: rotate(320deg) scale(1); }
+  100% { opacity: 0; transform: rotate(430deg) scale(1.35); }
+}
+
+@keyframes pkmn-evo-reveal {
+  /* The jump at 45% is deliberate: the two filter lists don't interpolate, so
+     the sprite snaps from white silhouette to colour inside the flash — which
+     is exactly where the change is meant to be invisible. */
+  0%, 45% { filter: brightness(0) invert(1) drop-shadow(0 0 16px #fff); }
+  46%, 62% { filter: brightness(1.85) drop-shadow(0 0 12px rgba(255, 255, 255, 0.95)); }
+  100% { filter: brightness(1) drop-shadow(0 0 0 rgba(255, 255, 255, 0)); }
+}
+
+/* Reduced motion: no strobe, no spin — just a soft glow that hands over the
+   new sprite. The swap itself still happens, on the same timings. */
+@media (prefers-reduced-motion: reduce) {
+  #pkmn-pet-root .pkmn-pet.pkmn-evolving .pkmn-pet-sprite img,
+  #pkmn-pet-root .pkmn-pet.pkmn-evolved .pkmn-pet-sprite img { animation: none; }
+  #pkmn-pet-root .pkmn-pet.pkmn-evolving .pkmn-pet-flash { animation: pkmn-evo-fade-in 1100ms ease both; }
+  #pkmn-pet-root .pkmn-pet.pkmn-evolved .pkmn-pet-flash { animation: pkmn-evo-fade-out 700ms ease both; }
+  #pkmn-pet-root .pkmn-pet .pkmn-pet-flash::before { animation: none !important; opacity: 0; }
+}
+
+@keyframes pkmn-evo-fade-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 0.85; transform: scale(0.95); }
+}
+
+@keyframes pkmn-evo-fade-out {
+  from { opacity: 0.85; transform: scale(0.95); }
+  to { opacity: 0; transform: scale(1.1); }
+}
