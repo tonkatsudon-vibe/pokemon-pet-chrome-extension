@@ -49,7 +49,7 @@ Gastly and it evolves (see [Evolution](#evolution)).
 The whole table lives in **`src/characters.js`**, which both the engine and the
 popup read, so the two can never disagree about who exists.
 
-## Install (load unpacked)
+## Install in Chrome (load unpacked)
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
@@ -58,6 +58,23 @@ popup read, so the two can never disagree about who exists.
    walking. Tick more Pokémon in the popup to add them alongside.
 
 If a tab was already open before installing, reload it.
+
+## Install in Firefox
+
+Firefox uses `manifest.firefox.json` because its Manifest V3 background script
+format differs from Chrome's. To prepare the signed add-on package, run from the
+repository root:
+
+```sh
+python3 scripts/package-firefox.py
+```
+
+This creates `dist/pokemon-browser-pet-firefox.zip`. Submit that ZIP at
+[addons.mozilla.org/developers](https://addons.mozilla.org/developers/) and
+follow Mozilla's review and signing process. Once approved, install the
+published add-on from its AMO page in Firefox. Firefox release builds require
+Mozilla-signed add-ons; loading an unpacked extension through `about:debugging`
+is temporary and is only suitable for testing.
 
 ## Popup settings
 
